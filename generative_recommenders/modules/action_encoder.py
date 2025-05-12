@@ -25,6 +25,25 @@ from generative_recommenders.ops.jagged_tensors import concat_2D_jagged
 
 
 class ActionEncoder(HammerModule):
+    """
+    Convert user actions and optional watchtime to fixed-length embeddings.
+
+    Setup:
+        - action_embedding_dim: 64
+        - action_feature_name: "actions"
+        - action_weights: [1, 2] (1 stands for "click" while 2 for "buy")
+        - watchtime_feature_name: "watchtimes"
+        - watchtime_to_action_thresholds_and_weights : [(10, 4), (60, 8)]
+            - watchtime >= 10 seconds, considered as new action with weight 4
+            - watchtime >= 60 seconds, considered as new action with weight 8
+    
+    After class initialization:
+        - self._combined_action_weights: torch.tensor([1, 2, 4, 8])
+        - self._num_action_types: 4
+        - self._action_embedding_table: (4, 64) learnable matrix
+        - self._target_action_embedding_table: (1, 4 * 64) learnable matrix
+    """
+
     def __init__(
         self,
         action_embedding_dim: int,
@@ -79,6 +98,42 @@ class ActionEncoder(HammerModule):
         seq_embeddings: torch.Tensor,
         seq_payloads: Dict[str, torch.Tensor],
     ) -> torch.Tensor:
+        """
+        Assume seq_payloads has the following content
+        {
+            "actions": - torch.tensor([1, 0, 2]),
+            "watchtimes": torch.tensor([5, 15, 70])
+        }
+
+        Forward function will
+        1. Extract actions and watchtimes from seq_payloads
+            - seq_actions = torch.tensor([1, 0, 2])
+            - seq_watchtimes = torch.tensor([5, 15, 70])
+        2. Update seq_actions based on watch times
+            For first threshold (10, 4)
+            - watchtimes >= 10 -> torch.tensor([False, True, True])
+            - convert to int64 and times weight -> torch.tensor([0, 4, 4])
+            - bitwise_or -> torch.tensor([1, 4, 6])
+            For second threshold (60, 8)
+            - watchtimes >= 60 -> torch.tensor([False, False, True])
+            - convert to int64 and times weight -> torch.tensor([0, 0, 8])
+            - bitwise_or -> torch.tensor([1, 4, 14])
+        3. 计算exploded_actions
+            - seq_actions.unsqueeze(-1) : torch.tensor([[1], [4], [14]])
+            - self._combined_action_weights.unsqueeze(0) : torch.tensor([[1, 2, 4, 8]])
+            - torch.bitwise_and(seq_actions.unsqueeze(-1), self._combined_action_weights.unsqueeze(0)) :
+                [[1 & 1, 1 & 2, 1 & 4, 1 & 8],   -> [[1, 0, 0, 0],
+                [4 & 1, 4 & 2, 4 & 4, 4 & 8],   ->  [0, 0, 4, 0],
+                [14 & 1, 14 & 2, 14 & 4, 14 & 8]]  ->  [0, 2, 4, 8]]
+            - >0 转换为bool类型
+                [[True, False, False, False],
+                [False, False, True, False],
+                [False, True, True, True]]
+            - 这就是 exploded_actions. 它是一个(3, 4)的张量, 表示每个时间步(3个)激活了哪些行为类型(4种)
+                - 行为1 (点击): 激活了第1种行为类型 (原始权重1)
+                - 行为2 (观看>=10s): 激活了第3种行为类型 (观看时长权重4)
+                - 行为3 (购买 + 观看>=10s + 观看>=60s): 激活了第2, 3, 4种行为类型 (原始权重2, 观看时长权重4, 观看时长权重8)
+        """
         seq_actions = seq_payloads[self._action_feature_name]
         if len(self._watchtime_to_action_thresholds_and_weights) > 0:
             watchtimes = seq_payloads[self._watchtime_feature_name]
