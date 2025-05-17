@@ -62,7 +62,11 @@ def mp_train_fn(
         logging.info(f"Rank {rank}: loading gin config from {gin_config_file}")
         gin.parse_config_file(gin_config_file)
 
-    train_fn(rank, world_size, master_port)
+    print(rank)
+    print(world_size)
+    print(master_port)
+
+    # train_fn(rank, world_size, master_port)
 
 
 def _main(argv) -> None:  # pyre-ignore [2]
