@@ -36,6 +36,24 @@ def movielens_seq_features_from_row(
     device: int,
     max_output_length: int,
 ) -> Tuple[SequentialFeatures, torch.Tensor, torch.Tensor]:
+    """
+    Args:
+        row (Dict[str, torch.Tensor]):
+        device (int): 默认情况来自rank, 本地环境中测试为0
+        max_output_length (int): gr_output_length + 1为11
+
+    Returns:
+        Tuple[SequentialFeatures, torch.Tensor, torch.Tensor]: _description_
+    """
+
+    # 使用ml-1m数据集的情况下, row中变量的维度为
+    #   historical_lengths: ([128]) 
+    #   historical_ids: ([128, 200])
+    #   historical_ratings: ([128, 200])
+    #   historical_timestamps: ([128, 200])
+    #   target_ids: ([128]) -> ([128, 1])
+    #   target_ratings: ([128]) -> ([128, 1])
+    #   target_timestamps: ([128]) -> ([128, 1])
     historical_lengths = row["history_lengths"].to(device)  # [B]
     historical_ids = row["historical_ids"].to(device)  # [B, N]
     historical_ratings = row["historical_ratings"].to(device)
@@ -45,6 +63,7 @@ def movielens_seq_features_from_row(
     target_timestamps = row["target_timestamps"].to(device).unsqueeze(1)
     if max_output_length > 0:
         B = historical_lengths.size(0)
+        # ([128, 200] + [128, 11]) -> ([128, 211])
         historical_ids = torch.cat(
             [
                 historical_ids,
@@ -76,6 +95,14 @@ def movielens_seq_features_from_row(
             ],
             dim=1,
         )
+
+        # 对于批次中的每一个序列(每一行 i), 这行代码会将 target_timestamps[i, 0] 的值(即第i个序列的目标时间戳)
+        # 写入到 historical_timestamps[i, historical_lengths[i]]的位置
+        #
+        # 换句话说，它将每个序列的目标时间戳放置在该序列原始历史记录的正后方. 如果historical_timestamps之前已经
+        # 被填充了0(如代码中所示, 为了达到max_output_length), 那么这个目标时间戳就会覆盖掉那个位置的0.
+        # 这是一种在序列数据中将目标信息整合到历史序列末尾的常见做法, 常用于为序列模型(如Transformer)准备输入,
+        # 模型需要基于历史和当前目标的部分信息来预测未来的交互
         historical_timestamps.scatter_(
             dim=1,
             index=historical_lengths.view(-1, 1),

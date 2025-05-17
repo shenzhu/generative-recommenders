@@ -54,7 +54,8 @@ class LocalEmbeddingModule(EmbeddingModule):
         return f"local_emb_d{self._item_embedding_dim}"
 
     def reset_params(self) -> None:
-        for name, params in self.named_parameters():
+        for name, params in self.named_parametrs():
+            print(f"{name}: {params.shape}")
             if "_item_emb" in name:
                 print(
                     f"Initialize {name} as truncated normal: {params.data.size()} params"
