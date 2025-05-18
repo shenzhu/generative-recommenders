@@ -79,12 +79,19 @@ class LearnablePositionalEmbeddingInputFeaturesPreprocessor(
         B, N = past_ids.size()
         D = past_embeddings.size(-1)
 
+        # torch.arange(N, device=past_ids.device): 创建一个从0到N - 1的整数序列, 表示序列中的
+        # 位置
+        # .unsqueeze(0).repeat(B, 1): 将位置序列从[N]变为[1, N], 然后复制B次, 得到[B, N]的矩阵
         user_embeddings = past_embeddings * (self._embedding_dim**0.5) + self._pos_emb(
             torch.arange(N, device=past_ids.device).unsqueeze(0).repeat(B, 1)
         )
         user_embeddings = self._emb_dropout(user_embeddings)
 
+        # 项目ID 0 用于表示填充(padding)
+        # .unsequeeze(-1): [B, N] -> [B, N, 1]
         valid_mask = (past_ids != 0).unsqueeze(-1).float()  # [B, N, 1]
+        
+        # [B, N, D] * [B, N, 1] -> [B, N, D]
         user_embeddings *= valid_mask
         return past_lengths, user_embeddings, valid_mask
 
